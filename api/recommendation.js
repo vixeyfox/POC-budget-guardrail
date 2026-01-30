@@ -52,9 +52,28 @@ export default async function handler(req, res) {
       })
     });
 
+        
     const data = await response.json();
+    
+    // If OpenAI returns an error (no choices), show it so we can fix the real cause
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "OpenAI request failed",
+        status: response.status,
+        details: data
+      });
+    }
+    
+    // If it’s 200 OK but still no choices, show the whole response
+    if (!data?.choices?.[0]?.message?.content) {
+      return res.status(500).json({
+        error: "OpenAI returned no message content",
+        details: data
+      });
+    }
+    
+    const text = data.choices[0].message.content;
 
-    const text = data?.choices?.[0]?.message?.content || "";
 
     // Attempt to parse JSON response, otherwise wrap it
     let parsed;
