@@ -117,11 +117,13 @@ export default async function handler(req, res) {
     const DEFAULT_CORPORATE_STRATEGY = `
 Corporate Strategy for Resource Allocation (Ground Truth):
 - Protect mission-critical and risk-critical spending:
-  - Payroll and Benefits are mission-critical: avoid cutting unless extreme; if OVER, prefer increase budget or reallocate from discretionary areas.
+  - Payroll and Benefits are mission-critical: avoid cutting unless extreme; 
+  if OVER, prefer increase budget unless there is explicitly identified headroom in another G&A line.
   - Security & Compliance is risk-critical: do not cut below minimum; if OVER, justify increase or reallocate from lower priority areas.
 - Prioritize product differentiation and growth:
   - R&D Investment is strategically important: if OVER, prefer reallocation or increase budget if tied to roadmap milestones.
-  - Cloud Compute & Storage should be optimized: if OVER, recommend cost optimization (rightsizing/reservations), then reallocate, then increase budget if tied to growth.
+  - Cloud Compute & Storage should be optimized: if OVER, recommend cost optimization (rightsizing/reservations),
+  then reallocate, then increase budget if tied to growth.
 - Revenue acceleration and delivery:
   - Advertising/Events is tunable: if OVER, prefer cut costs unless strong ROI evidence is noted.
   - Professional Services supports delivery: if OVER, reallocate or increase if tied to committed client obligations.
