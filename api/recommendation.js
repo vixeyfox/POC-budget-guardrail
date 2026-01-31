@@ -17,7 +17,7 @@ export default async function handler(req, res) {
       Amount,
       Notes,
 
-      // Budget context fields (from VarianceSummary lookup)
+      // VarianceSummary fields from Google Sheets lookup
       BudgetAmount,
       ActualToDate,
       VarianceAmount,
@@ -26,24 +26,63 @@ export default async function handler(req, res) {
       Status,
       Headroom,
 
-      // Optional: if later you add this in Zapier
-      HeadroomCandidates,   // can be text or JSON string
-      StrategyOverride      // optional text override
+      // Optional: if you ever add these later
+      HeadroomCandidates,  // JSON string or plain text
+      StrategyOverride     // optional custom strategy text passed from Zapier
     } = body;
 
-    // Basic validation
+    // Basic validation (keep minimal for MVP)
     if (!Division || !Category || Amount === undefined || Amount === null || Amount === "") {
       return res.status(400).json({
         error: "Missing required fields: Division, Category, Amount"
       });
     }
 
-    // Helper: safe number parsing (Zapier often sends strings)
+    // Helpers: safe number parsing
     const num = (v) => {
       const n = Number(v);
       return Number.isFinite(n) ? n : null;
     };
 
+    const pct = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+
+    // ---- 2) Normalize numbers (Zapier often sends strings) ----
+    const budgetAmount = num(BudgetAmount);
+    const actualToDate = num(ActualToDate);
+    const varianceAmount = num(VarianceAmount);
+    const variancePct = pct(VariancePct);
+    const allowedPct = pct(AllowedVariancePct);
+    const headroom = num(Headroom);
+
+    // ---- 3) Determine Status (trust Google Sheets, but include fallback) ----
+    // Your sheet formula is:
+    // =IF(G2 > H2, "OVER", IF(G2 > 0, "WATCH", "OK"))
+    // We'll use Status if provided, otherwise compute it from variancePct/allowedPct.
+    let status = (Status || "").toUpperCase().trim();
+
+    if (!status) {
+      if (variancePct !== null && allowedPct !== null) {
+        if (variancePct > allowedPct) status = "OVER";
+        else if (variancePct > 0) status = "WATCH";
+        else status = "OK";
+      } else {
+        status = "WATCH"; // safe default if missing data
+      }
+    }
+
+    // ---- 4) Tolerance label (for your DecisionLog AITolerance column) ----
+    const toleranceFromAllowed = (ap) => {
+      if (ap === null) return "moderate";
+      if (ap <= 0.05) return "strict";
+      if (ap <= 0.1) return "moderate";
+      return "loose";
+    };
+    const toleranceLabel = toleranceFromAllowed(allowedPct);
+
+    // ---- 5) Build structured context objects (useful for prompting) ----
     const expense = {
       Division,
       Category,
@@ -52,58 +91,18 @@ export default async function handler(req, res) {
       Notes: Notes || ""
     };
 
-    const context = {
-      BudgetAmount: num(BudgetAmount),
-      ActualToDate: num(ActualToDate),
-      VarianceAmount: num(VarianceAmount),
-      VariancePct: num(VariancePct),
-      AllowedVariancePct: num(AllowedVariancePct),
-      Status: (Status || "").toUpperCase(),
-      Headroom: num(Headroom)
-    };
-
-    // ---- 2) Build a clean VarianceSummary string for DecisionLog ----
+    // A clean VarianceSummary string for DecisionLog
     const varianceSummaryText = [
-      `Budget: ${context.BudgetAmount ?? "n/a"}`,
-      `ActualToDate: ${context.ActualToDate ?? "n/a"}`,
-      `VarianceAmount: ${context.VarianceAmount ?? "n/a"}`,
-      `VariancePct: ${context.VariancePct ?? "n/a"}`,
-      `Allowed: ${context.AllowedVariancePct ?? "n/a"}`,
-      `Status: ${context.Status || "n/a"}`,
-      `Headroom: ${context.Headroom ?? "n/a"}`
+      `Budget: ${budgetAmount ?? "n/a"}`,
+      `ActualToDate: ${actualToDate ?? "n/a"}`,
+      `VarianceAmount: ${varianceAmount ?? "n/a"}`,
+      `VariancePct: ${variancePct ?? "n/a"}`,
+      `Allowed: ${allowedPct ?? "n/a"}`,
+      `Status: ${status}`,
+      `Headroom: ${headroom ?? "n/a"}`
     ].join(" | ");
 
-    // ---- 3) Corporate strategy prompt (EDIT THIS ONCE, use forever) ----
-    // You can also put this into a Vercel env var CORPORATE_STRATEGY_PROMPT if you prefer.
-    const DEFAULT_CORPORATE_STRATEGY = `
-Corporate Strategy for Resource Allocation (Ground Truth):
-- Protect "keep-the-lights-on" and risk-critical spending:
-  - Payroll and Benefits are mission-critical: avoid cutting unless extreme. If OVER, prefer budget increase or reallocation from non-critical areas.
-  - Security & Compliance is risk-critical: do not cut below minimum; if OVER, justify increase or reallocate from lower priority areas.
-- Prioritize growth and product differentiation:
-  - R&D Investment is strategically important: if OVER, prefer reallocation or budget increase if it supports roadmap milestones.
-  - Cloud Compute & Storage should be optimized: if OVER, first recommend cost optimization (rightsizing/reservations), then reallocate, then increase budget if usage is tied to growth.
-- Revenue acceleration and go-to-market efficiency:
-  - Advertising/Events can be tuned quickly: if OVER, prefer cut costs (reduce spend) unless strong ROI evidence is noted.
-  - Professional Services is delivery capacity: if OVER, prefer reallocate or increase budget if tied to committed client delivery.
-- Data tooling:
-  - Market Data/Analytics Subscriptions should be rationalized: if OVER, prefer cut costs (remove unused seats/tools) or reallocate if essential for product goals.
-
-General rules:
-- If Status is OK: approve (no action needed).
-- If Status is WATCH: flag + preventative suggestion (only recommend reallocation if it prevents near-term OVER).
-- If Status is OVER: pick the best action using the strategy above:
-  - "cut costs" if category is discretionary/tunable (e.g., Advertising/Events, some subscriptions)
-  - "increase budget" if category is mission-critical or ROI-justified (Payroll/Benefits/Security or R&D milestone)
-  - "reallocate budget" if there is known headroom elsewhere or if shifting aligns with strategy priorities
-`;
-
-    const corporateStrategy =
-      (process.env.CORPORATE_STRATEGY_PROMPT && process.env.CORPORATE_STRATEGY_PROMPT.trim()) ||
-      (StrategyOverride && String(StrategyOverride).trim()) ||
-      DEFAULT_CORPORATE_STRATEGY;
-
-    // Optional headroom candidates (not required today; safe to ignore if missing)
+    // Optional headroom candidates (future enhancement)
     let headroomCandidatesParsed = null;
     if (HeadroomCandidates) {
       try {
@@ -114,57 +113,82 @@ General rules:
       }
     }
 
-    // ---- 4) Map AllowedVariancePct to tolerance label ----
-    const toleranceFromAllowed = (allowed) => {
-      if (allowed === 0.05) return "strict";
-      if (allowed === 0.1) return "moderate";
-      if (allowed === 0.2) return "loose";
-      return "moderate";
-    };
-    const defaultTolerance = toleranceFromAllowed(context.AllowedVariancePct);
+    // ---- 6) Corporate strategy prompt (edit this once, and you're done) ----
+    const DEFAULT_CORPORATE_STRATEGY = `
+Corporate Strategy for Resource Allocation (Ground Truth):
+- Protect mission-critical and risk-critical spending:
+  - Payroll and Benefits are mission-critical: avoid cutting unless extreme; if OVER, prefer increase budget or reallocate from discretionary areas.
+  - Security & Compliance is risk-critical: do not cut below minimum; if OVER, justify increase or reallocate from lower priority areas.
+- Prioritize product differentiation and growth:
+  - R&D Investment is strategically important: if OVER, prefer reallocation or increase budget if tied to roadmap milestones.
+  - Cloud Compute & Storage should be optimized: if OVER, recommend cost optimization (rightsizing/reservations), then reallocate, then increase budget if tied to growth.
+- Revenue acceleration and delivery:
+  - Advertising/Events is tunable: if OVER, prefer cut costs unless strong ROI evidence is noted.
+  - Professional Services supports delivery: if OVER, reallocate or increase if tied to committed client obligations.
+- Data tooling:
+  - Market Data/Analytics subscriptions: if OVER, prefer cut costs (remove unused tools/seats) unless essential.
 
-    // ---- 5) Hard guardrail: if OK, always approve (saves time + makes sense) ----
-    if (context.Status === "OK") {
+Status definitions:
+- OK = under budget
+- WATCH = over budget but within allowed variance
+- OVER = over budget by greater than allowed variance
+`;
+
+    const corporateStrategy =
+      (process.env.CORPORATE_STRATEGY_PROMPT && process.env.CORPORATE_STRATEGY_PROMPT.trim()) ||
+      (StrategyOverride && String(StrategyOverride).trim()) ||
+      DEFAULT_CORPORATE_STRATEGY;
+
+    // ---- 7) Deterministic handling for OK and WATCH (fast, stable demo) ----
+    if (status === "OK") {
       const out = {
         VarianceSummary: varianceSummaryText,
-        AITolerance: defaultTolerance,
+        AITolerance: toleranceLabel,
         AIAction: "approve",
         ExpectedImpact: "No action needed; within budget guardrails. Saves review time by auto-approving.",
-        // Back-compat (won't hurt)
+        // backwards compatible keys
         summary: varianceSummaryText,
-        tolerance: defaultTolerance,
+        tolerance: toleranceLabel,
         recommendation: "approve"
       };
       return res.status(200).json(out);
     }
 
-    // ---- 6) Call OpenAI for WATCH/OVER (where strategy matters) ----
+    if (status === "WATCH") {
+      const out = {
+        VarianceSummary: varianceSummaryText,
+        AITolerance: toleranceLabel,
+        AIAction: "flag",
+        ExpectedImpact: "Early warning before policy breach; prompts review and prevents reactive overspend.",
+        summary: varianceSummaryText,
+        tolerance: toleranceLabel,
+        recommendation: "flag"
+      };
+      return res.status(200).json(out);
+    }
+
+    // ---- 8) OVER: call OpenAI to choose cut/reallocate/increase using strategy ----
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: "OPENAI_API_KEY not set" });
     }
 
-    // We keep allowed actions limited so output is reliable for Zapier + demo.
     const userPrompt =
       `You are an AI finance assistant. Use the corporate strategy below as ground truth.\n` +
-      `Return JSON ONLY with EXACT keys: VarianceSummary, AITolerance, AIAction, ExpectedImpact.\n\n` +
-
-      `AIAction must be exactly one of: "approve", "flag", "cut costs", "reallocate budget", "increase budget".\n` +
-      `AITolerance must be one of: strict, moderate, loose.\n\n` +
-
+      `We are currently OVER budget.\n\n` +
+      `Return JSON ONLY with EXACT keys: VarianceSummary, AITolerance, AIAction, ExpectedImpact.\n` +
+      `- AIAction must be exactly one of: "cut costs", "reallocate budget", "increase budget".\n` +
+      `- AITolerance must be one of: strict, moderate, loose.\n\n` +
       `Expense:\n${JSON.stringify(expense)}\n\n` +
       `BudgetContext:\n${varianceSummaryText}\n\n` +
       (headroomCandidatesParsed
-        ? `Optional headroom candidates to support reallocation (if provided):\n${JSON.stringify(headroomCandidatesParsed)}\n\n`
+        ? `Optional headroom candidates (if provided):\n${JSON.stringify(headroomCandidatesParsed)}\n\n`
         : "") +
-
       `Corporate Strategy (ground truth):\n${corporateStrategy}\n\n` +
-
-      `Decision guidance:\n` +
-      `- If Status is WATCH: set AIAction to "flag" unless a reallocation is clearly warranted to prevent OVER.\n` +
-      `- If Status is OVER: choose between "cut costs", "reallocate budget", "increase budget" using the strategy.\n` +
-      `- Always set VarianceSummary to the BudgetContext string you were given (you may append 1 short sentence if useful).\n` +
-      `- ExpectedImpact: 1 short sentence (time saved, risk reduced, or performance improved).\n`;
+      `Instructions:\n` +
+      `- Choose the best action using the strategy (not generic rules).\n` +
+      `- VarianceSummary should start with the BudgetContext string exactly as given; you may append 1 short sentence.\n` +
+      `- ExpectedImpact: 1 short sentence about risk reduction, delivery protection, or time saved.\n`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -194,7 +218,7 @@ General rules:
 
     const text = data?.choices?.[0]?.message?.content || "";
 
-    // ---- 7) Parse + validate (so Zapier doesn’t break) ----
+    // ---- 9) Parse + validate output (so Zapier never breaks) ----
     let parsed = null;
     try {
       parsed = JSON.parse(text);
@@ -202,24 +226,15 @@ General rules:
       parsed = null;
     }
 
-    const aiActionAllowed = new Set(["approve", "flag", "cut costs", "reallocate budget", "increase budget"]);
+    const aiActionAllowed = new Set(["cut costs", "reallocate budget", "increase budget"]);
     const tolAllowed = new Set(["strict", "moderate", "loose"]);
 
-    // Deterministic fallback for reliability
-    const fallbackAction = () => {
-      if (context.Status === "WATCH") return "flag";
-      if (context.Status === "OVER") {
-        // Default safe choice for OVER if we can't reason further
-        return "reallocate budget";
-      }
-      return "flag";
-    };
-
+    // Fallback (safe default)
     const finalOut = {
       VarianceSummary: varianceSummaryText,
-      AITolerance: defaultTolerance,
-      AIAction: fallbackAction(),
-      ExpectedImpact: "Automates variance review and provides consistent recommendations."
+      AITolerance: toleranceLabel,
+      AIAction: "reallocate budget",
+      ExpectedImpact: "Reduces policy breach risk while maintaining priority work."
     };
 
     if (parsed && typeof parsed === "object") {
@@ -237,7 +252,7 @@ General rules:
       }
     }
 
-    // Backward-compatible keys (won't hurt your current Zap mappings)
+    // backwards compatible keys
     finalOut.summary = finalOut.VarianceSummary;
     finalOut.tolerance = finalOut.AITolerance;
     finalOut.recommendation = finalOut.AIAction;
