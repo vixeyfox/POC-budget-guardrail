@@ -19,8 +19,8 @@ Returns JSON in a format that’s easy to map into a DecisionLog spreadsheet row
 
 Repo structure
 .
-├── api/
-│   └── recommendation.js   # Serverless API endpoint called by Zapier
+├── api/ <br>
+│   └── recommendation.js   # Serverless API endpoint called by Zapier <br>
 └── package.json            # Minimal project metadata
 
 Expected request (what to send from the Zapier form's Zap)
