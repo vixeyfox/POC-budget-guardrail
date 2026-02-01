@@ -105,11 +105,11 @@ Example body:
 Typical workflow (how this is used in the full POC)
 A common setup is:
 
-Zapier Form → write to Google Sheets ActualExpenses
-Google Sheets formulas update VarianceSummary
-Zapier looks up the matching VarianceSummary row
-Zapier sends expense + budget context to this API
-API returns a recommendation
+Zapier Form → write to Google Sheets ActualExpenses →
+Google Sheets formulas update VarianceSummary →
+Zapier looks up the matching VarianceSummary row →
+Zapier sends expense + budget context to this API →
+API returns a recommendation →
 Zapier writes the recommendation to Google Sheets DecisionLog
 
 Notes / limitations
