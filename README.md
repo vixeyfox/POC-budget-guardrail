@@ -17,8 +17,8 @@ cut costs, reallocate budget, or increase budget<br>
 
 Returns JSON in a format that’s easy to map into a DecisionLog spreadsheet row.
 
-Repo structure
-.
+Repo structure<br>
+.<br>
 ├── api/ <br>
 │   └── recommendation.js   # Serverless API endpoint called by Zapier <br>
 └── package.json            # Minimal project metadata
