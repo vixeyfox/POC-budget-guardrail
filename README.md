@@ -1,13 +1,12 @@
-Proof of Concept (POC) Budget Guardrail
-AI-Enabled Budget Guardrails
-A small proof‑of‑concept API that powers an AI‑assisted budget guardrails workflow.
-It is designed to be called from automation tools (e.g., Zapier) with expense + budget context, then returns a structured recommendation that can be written into a Google Sheets decision log.
-What this does (in plain language)
+Proof of Concept (POC) AI-Enabled Budget Guardrails <br><br>
+A small proof‑of‑concept API that powers an AI‑assisted budget guardrails workflow. <br>
+It is designed to be called from automation tools (e.g., Zapier) with expense + budget context, then returns a structured recommendation that can be written into a Google Sheets decision log.<br>
+What this does (in plain language)<br>
 When an expense is submitted, this API:
 
-Receives the expense details (division, category, vendor, amount, notes)
-Receives budget context (budget, actual to date, variance %, allowed variance %, status, headroom)
-Applies simple guardrail behavior:
+Receives the expense details (division, category, vendor, amount, notes)<br>
+Receives budget context (budget, actual to date, variance %, allowed variance %, status, headroom)<br>
+Applies simple guardrail behavior:<br>
 
 OK (under budget) → returns approve <br><br>
 WATCH (above budget, yet within tolerance threshold) → returns flag <br><br>
