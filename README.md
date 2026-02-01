@@ -9,11 +9,11 @@ Receives the expense details (division, category, vendor, amount, notes)
 Receives budget context (budget, actual to date, variance %, allowed variance %, status, headroom)
 Applies simple guardrail behavior:
 
-OK (under budget) → returns approve
-WATCH (above budget, yet within tolerance threshold) → returns flag
-OVER (exceeds budget tolerance) → calls OpenAI and returns a strategy‑aware recommendation:
+OK (under budget) → returns approve <br><br>
+WATCH (above budget, yet within tolerance threshold) → returns flag <br><br>
+OVER (exceeds budget tolerance) → calls OpenAI and returns a strategy‑aware recommendation:<br>
 
-cut costs, reallocate budget, or increase budget
+cut costs, reallocate budget, or increase budget<br>
 
 Returns JSON in a format that’s easy to map into a DecisionLog spreadsheet row.
 
